@@ -1,0 +1,14 @@
+{
+  "name": "restaurant-finder-api",
+  "version": "1.0.0",
+  "description": "Serverless API for restaurant finder",
+  "main": "[...route].ts",
+  "dependencies": {
+    "serverless-http": "^3.2.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
+  }
+}
