@@ -58,7 +58,8 @@ const openai = new OpenAI({
 async function convertMessageToCommand(message: string): Promise<LLMCommand> {
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-4o-mini',
+      max_tokens: 500, // Limit token usage
       messages: [
         {
           role: 'system',
@@ -156,7 +157,8 @@ async function searchRestaurants(command: LLMCommand): Promise<Restaurant[]> {
       headers: {
         'Accept': 'application/json',
         'Authorization': FOURSQUARE_API_KEY
-      }
+      },
+      timeout: 8000 // 8 second timeout to prevent Vercel's 10s serverless function timeout
     });
 
     console.log('Foursquare API response status:', response.status);
@@ -230,6 +232,11 @@ async function searchRestaurants(command: LLMCommand): Promise<Restaurant[]> {
  * and fetches restaurant data from Foursquare
  */
 async function executeQuery(req: express.Request, res: express.Response) {
+  // Set a timeout for the entire request
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error('Request timeout')), 9500); // 9.5 seconds
+  });
+
   try {
     const { message } = req.body as ExecuteRequest;
 
@@ -237,22 +244,28 @@ async function executeQuery(req: express.Request, res: express.Response) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    // Step 1: Convert natural language to structured command using OpenAI
-    console.log('Converting message to command...');
-    const command = await convertMessageToCommand(message);
-    console.log('Command:', JSON.stringify(command, null, 2));
+    // Race against the timeout
+    const result = await Promise.race([
+      (async () => {
+        // Step 1: Convert natural language to structured command using OpenAI
+        console.log('Converting message to command...');
+        const command = await convertMessageToCommand(message);
+        console.log('Command:', JSON.stringify(command, null, 2));
 
-    // Step 2: Use the command to search for restaurants using Foursquare
-    console.log('Searching restaurants...');
-    const restaurants = await searchRestaurants(command);
-    console.log(`Found ${restaurants.length} restaurants`);
+        // Step 2: Use the command to search for restaurants using Foursquare
+        console.log('Searching restaurants...');
+        const restaurants = await searchRestaurants(command);
+        console.log(`Found ${restaurants.length} restaurants`);
 
-    // Step 3: Return the results
-    const response: ExecuteResponse = {
-      restaurants
-    };
+        // Step 3: Return the results
+        return {
+          restaurants
+        } as ExecuteResponse;
+      })(),
+      timeoutPromise
+    ]);
 
-    return res.status(200).json(response);
+    return res.status(200).json(result);
   } catch (error) {
     console.error('Error executing query:', error);
     // Ensure we're returning a valid JSON object
