@@ -100,7 +100,13 @@ async function convertMessageToCommand(message: string): Promise<LLMCommand> {
       throw new Error('No content returned from OpenAI');
     }
 
-    return JSON.parse(content) as LLMCommand;
+    try {
+      return JSON.parse(content) as LLMCommand;
+    } catch (parseError) {
+      console.error('Error parsing OpenAI response as JSON:', parseError);
+      console.log('Raw content:', content);
+      throw new Error('Failed to parse OpenAI response as JSON');
+    }
   } catch (error) {
     console.error('Error converting message to command:', error);
     throw new Error('Failed to convert natural language to structured command');
@@ -157,40 +163,51 @@ async function searchRestaurants(command: LLMCommand): Promise<Restaurant[]> {
     console.log('Foursquare API response data:', JSON.stringify(response.data, null, 2));
 
     // Process and filter results
-    let restaurants = response.data.results.map((result: any) => {
-      // Extract price level text
-      let priceLevel = 'Unknown';
-      if (result.price !== undefined) {
-        const priceTiers = ['Inexpensive', 'Moderate', 'Expensive', 'Very Expensive'];
-        priceLevel = priceTiers[result.price - 1] || 'Unknown';
+    let restaurants = [];
+    try {
+      if (!response.data.results || !Array.isArray(response.data.results)) {
+        console.error('Unexpected Foursquare API response format:', response.data);
+        return [];
       }
-
-      // Format address
-      const formattedAddress = result.location?.formatted_address || 'Address not available';
       
-      // Format hours
-      let operatingHours = 'Hours not available';
-      if (result.hours?.display) {
-        operatingHours = result.hours.display;
-      }
+      restaurants = response.data.results.map((result: any) => {
+        // Extract price level text
+        let priceLevel = 'Unknown';
+        if (result.price !== undefined) {
+          const priceTiers = ['Inexpensive', 'Moderate', 'Expensive', 'Very Expensive'];
+          priceLevel = priceTiers[result.price - 1] || 'Unknown';
+        }
 
-      // Extract cuisine/category
-      let cuisine = 'Not specified';
-      if (result.categories && result.categories.length > 0) {
-        cuisine = result.categories[0].name;
-      }
+        // Format address
+        const formattedAddress = result.location?.formatted_address || 'Address not available';
+        
+        // Format hours
+        let operatingHours = 'Hours not available';
+        if (result.hours?.display) {
+          operatingHours = result.hours.display;
+        }
 
-      return {
-        name: result.name,
-        address: formattedAddress,
-        cuisine: cuisine,
-        rating: result.rating || 0,
-        priceLevel: priceLevel,
-        operatingHours: operatingHours,
-        latitude: result.geocodes?.main?.latitude,
-        longitude: result.geocodes?.main?.longitude
-      };
-    });
+        // Extract cuisine/category
+        let cuisine = 'Not specified';
+        if (result.categories && result.categories.length > 0) {
+          cuisine = result.categories[0].name;
+        }
+
+        return {
+          name: result.name || 'Unknown Restaurant',
+          address: formattedAddress,
+          cuisine: cuisine,
+          rating: result.rating || 0,
+          priceLevel: priceLevel,
+          operatingHours: operatingHours,
+          latitude: result.geocodes?.main?.latitude,
+          longitude: result.geocodes?.main?.longitude
+        };
+      });
+    } catch (mapError) {
+      console.error('Error processing Foursquare results:', mapError);
+      return [];
+    }
 
     // Filter by minimum rating if specified
     if (parameters.min_rating !== undefined) {
@@ -238,6 +255,7 @@ async function executeQuery(req: express.Request, res: express.Response) {
     return res.status(200).json(response);
   } catch (error) {
     console.error('Error executing query:', error);
+    // Ensure we're returning a valid JSON object
     return res.status(500).json({ 
       error: 'An error occurred while processing your request',
       details: error instanceof Error ? error.message : 'Unknown error'
